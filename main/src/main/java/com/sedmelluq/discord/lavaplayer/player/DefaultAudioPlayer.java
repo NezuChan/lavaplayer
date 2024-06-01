@@ -80,6 +80,11 @@ public class DefaultAudioPlayer implements AudioPlayer, TrackStateListener {
                 return false;
             }
 
+            if (scheduledTrack != null) {
+                scheduledTrack.stop();
+                scheduledTrack = null;
+            }
+
             activeTrack = newTrack;
             lastRequestTime = System.currentTimeMillis();
             lastReceiveTime = System.nanoTime();
@@ -146,14 +151,26 @@ public class DefaultAudioPlayer implements AudioPlayer, TrackStateListener {
     /**
      * Stop currently playing track.
      */
-    public void stopTrack() {
-        stopWithReason(STOPPED);
+    public void stopCurrentTrack() {
+        stopWithReason(STOPPED, false);
     }
 
-    private void stopWithReason(AudioTrackEndReason reason) {
+    /**
+     * Stop currently playing track and any scheduled tracks.
+     */
+    public void stopTrack() {
+        stopWithReason(STOPPED, true);
+    }
+
+    private void stopWithReason(AudioTrackEndReason reason, boolean includeScheduled) {
         shadowTrack = null;
 
         synchronized (trackSwitchLock) {
+            if (includeScheduled && scheduledTrack != null) {
+                scheduledTrack.stop();
+                scheduledTrack = null;
+            }
+
             InternalAudioTrack previousTrack = activeTrack;
             activeTrack = null;
 
@@ -435,7 +452,7 @@ public class DefaultAudioPlayer implements AudioPlayer, TrackStateListener {
         if (track != null && System.currentTimeMillis() - lastRequestTime >= threshold) {
             log.debug("Triggering cleanup on an audio player playing track {}", track);
 
-            stopWithReason(CLEANUP);
+            stopWithReason(CLEANUP, true);
         }
     }
 }
