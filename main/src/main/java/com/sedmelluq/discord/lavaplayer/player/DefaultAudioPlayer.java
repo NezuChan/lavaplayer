@@ -13,7 +13,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -27,6 +26,7 @@ import static com.sedmelluq.discord.lavaplayer.track.AudioTrackEndReason.*;
 public class DefaultAudioPlayer implements AudioPlayer, TrackStateListener {
     private static final Logger log = LoggerFactory.getLogger(AudioPlayer.class);
 
+    protected volatile InternalAudioTrack scheduledTrack;
     private volatile InternalAudioTrack activeTrack;
     private volatile long lastRequestTime;
     private volatile long lastReceiveTime;
@@ -102,6 +102,45 @@ public class DefaultAudioPlayer implements AudioPlayer, TrackStateListener {
 
         manager.executeTrack(this, newTrack, manager.getConfiguration(), options);
         return true;
+    }
+
+    /**
+     * @return Currently scheduled track, or null
+     */
+    public AudioTrack getScheduledTrack() {
+        return scheduledTrack;
+    }
+
+    /**
+     * Schedules the next track to be played. This will not trigger the track to be immediately played,
+     * but rather schedules it to play after the current track has finished. If there is no playing track,
+     * this function will return false
+     * @param track The track to schedule. This will overwrite the currently scheduled track, if one exists.
+     *              Passing null will clear the current scheduled track.
+     * @return True if the track was scheduled. If null is passed, this will always be false.
+     */
+    public boolean scheduleTrack(AudioTrack track) {
+        if (activeTrack == null && track != null) {
+            return false;
+        }
+
+        boolean scheduled = false;
+
+        synchronized (trackSwitchLock) {
+            if (scheduledTrack != null) {
+                scheduledTrack.stop();
+            }
+
+            InternalAudioTrack newTrack = (InternalAudioTrack) track;
+            scheduledTrack = newTrack;
+
+            if (activeTrack != null && track != null) {
+                manager.executeTrack(this, newTrack, manager.getConfiguration(), options);
+                scheduled = true;
+            }
+        }
+
+        return scheduled;
     }
 
     /**
@@ -241,11 +280,29 @@ public class DefaultAudioPlayer implements AudioPlayer, TrackStateListener {
     private void handleTerminator(InternalAudioTrack track) {
         synchronized (trackSwitchLock) {
             if (activeTrack == track) {
+                activeTrack = null;
+
+                boolean failedBeforeLoad = track.getActiveExecutor().failedBeforeLoad();
+                boolean swapped = false;
+
+                AudioTrackEndReason endReason = scheduledTrack != null
+                    ? (failedBeforeLoad ? LOAD_FAILED_GAPLESS : FINISHED_GAPLESS)
+                    : (failedBeforeLoad ? LOAD_FAILED : FINISHED);
+
+                if (scheduledTrack != null) {
+                    activeTrack = scheduledTrack;
+                    scheduledTrack = null;
+                    swapped = true;
+                }
+
                 try {
-                    activeTrack = null;
-                    dispatchEvent(new TrackEndEvent(this, track, track.getActiveExecutor().failedBeforeLoad() ? LOAD_FAILED : FINISHED));
+                    dispatchEvent(new TrackEndEvent(this, track, endReason));
                 } finally {
                     track.stop();
+                }
+
+                if (swapped && activeTrack != null) {
+                    dispatchEvent(new TrackStartEvent(this, activeTrack));
                 }
             }
         }
@@ -340,11 +397,7 @@ public class DefaultAudioPlayer implements AudioPlayer, TrackStateListener {
      */
     public void removeListener(AudioEventListener listener) {
         synchronized (trackSwitchLock) {
-            for (Iterator<AudioEventListener> iterator = listeners.iterator(); iterator.hasNext(); ) {
-                if (iterator.next() == listener) {
-                    iterator.remove();
-                }
-            }
+            listeners.removeIf(audioEventListener -> audioEventListener == listener);
         }
     }
 

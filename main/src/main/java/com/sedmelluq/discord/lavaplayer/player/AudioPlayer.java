@@ -27,6 +27,42 @@ public interface AudioPlayer extends AudioFrameProvider {
     boolean startTrack(AudioTrack track, boolean noInterrupt);
 
     /**
+     * @return Currently scheduled track, or null
+     */
+    default AudioTrack getScheduledTrack() {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Schedules the next track to be played. This will not trigger the track to be immediately played,
+     * but rather schedules it to play after the current track has finished. If there is no playing track,
+     * this function will return false
+     * @param track The track to schedule. This will overwrite the currently scheduled track, if one exists.
+     *              Passing null will clear the current scheduled track.
+     * @return True if the track was scheduled
+     */
+    default boolean scheduleTrack(AudioTrack track) {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Identical to {@link #scheduleTrack(AudioTrack)} but the replaceExisting parameter will determine
+     * whether an existing scheduled track will be overwritten.
+     * If replaceExisting is false and a track is scheduled, this will return false.
+     * If there is no playing track, this will return false.
+     * @param track The track to schedule.
+     * @param replaceExisting Whether to replace the current scheduled track, if one exists.
+     * @return True if the track was scheduled.
+     */
+    default boolean scheduleTrack(AudioTrack track, boolean replaceExisting) {
+        if (!replaceExisting && getScheduledTrack() != null) {
+            return false;
+        }
+
+        return scheduleTrack(track);
+    }
+
+    /**
      * Stop currently playing track.
      */
     void stopTrack();
